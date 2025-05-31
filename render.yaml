@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: plot-subdivision-api
+    env: python
+    buildCommand: ""
+    startCommand: gunicorn app:app
