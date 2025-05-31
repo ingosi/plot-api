@@ -2,3 +2,4 @@ Flask
 shapely
 geojson
 gunicorn
+geopandas
