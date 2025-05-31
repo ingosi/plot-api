@@ -1,24 +1,26 @@
-from flask import Flask, jsonify
+from flask import Flask, request, jsonify
+from subdivide import subdivide_polygon
 
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return {"message": "Plot API is live!"}
+    return "Subdivision API is running!"
 
-@app.route("/geojson")
-def get_geojson():
-    sample = {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[[36.89788, -1.53827], [36.89795, -1.53814], [36.89799, -1.53801], [36.89773, -1.53795], [36.89769, -1.53808], [36.89766, -1.53820], [36.89788, -1.53827]]]
-                },
-                "properties": {"id": 1}
-            }
-        ]
-    }
-    return jsonify(sample)
+@app.route("/subdivide", methods=["POST"])
+def subdivide():
+    data = request.get_json()
+
+    if not data or "coordinates" not in data or "count" not in data:
+        return jsonify({"error": "Missing 'coordinates' or 'count'"}), 400
+
+    try:
+        coords = data["coordinates"]
+        count = int(data["count"])
+        geojson_result = subdivide_polygon(coords, count)
+        return jsonify(geojson_result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    app.run(debug=True)
