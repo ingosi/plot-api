@@ -1,5 +1,2 @@
-Flask
+flask
 shapely
-geojson
-gunicorn
-geopandas
