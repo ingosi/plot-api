@@ -12,47 +12,66 @@ def calculate_area_m2(polygon: Polygon) -> float:
     return abs(geod.geometry_area_perimeter(geometry.Polygon(zip(lon, lat)))[0])
 
 def subdivide_polygon_auto(coords, n_parts):
+    from shapely.geometry import GeometryCollection
+
     polygon = Polygon(coords)
+    bounds = polygon.bounds
+    minx, miny, maxx, maxy = bounds
+    width = maxx - minx
+    height = maxy - miny
+
     if polygon.is_empty or not polygon.is_valid:
         raise ValueError("Invalid polygon")
 
-    minx, miny, maxx, maxy = polygon.bounds
-    width, height = maxx - minx, maxy - miny
-
-    # Auto choose direction
-    step = (width if width > height else height) / n_parts
-    lines = []
-    for i in range(1, n_parts):
-        if width > height:
-            x = minx + i * step
-            lines.append(LineString([(x, miny - 1), (x, maxy + 1)]))
-        else:
-            y = miny + i * step
-            lines.append(LineString([(minx - 1, y), (maxx + 1, y)]))
-
     result = polygon
-    for line in lines:
+    split_lines = []
+
+    # Determine dominant axis and generate split lines
+    if width > height:
+        step = width / n_parts
+        for i in range(1, n_parts):
+            x = minx + i * step
+            split_lines.append(LineString([(x, miny - 1), (x, maxy + 1)]))
+    else:
+        step = height / n_parts
+        for i in range(1, n_parts):
+            y = miny + i * step
+            split_lines.append(LineString([(minx - 1, y), (maxx + 1, y)]))
+
+    # Apply splits one by one
+    for line in split_lines:
         try:
             result = split(result, line)
-        except Exception:
-            continue
+            # if result is a GeometryCollection, ensure it's processed correctly
+            if isinstance(result, GeometryCollection):
+                result = [geom for geom in result if isinstance(geom, Polygon)]
+                result = GeometryCollection(result)
+        except Exception as e:
+            print(f"Split failed: {e}")
 
-    polygons = list(result) if not isinstance(result, Polygon) else [result]
+    # Ensure we only return polygons
+    polygons = []
+    if isinstance(result, GeometryCollection):
+        polygons = [geom for geom in result.geoms if isinstance(geom, Polygon)]
+    elif isinstance(result, Polygon):
+        polygons = [result]
 
     features = []
     for poly in polygons:
         if poly.area > 0:
-            area_m2 = calculate_area_m2(poly)
             features.append({
                 "type": "Feature",
                 "geometry": mapping(poly),
-                "properties": {"area_m2": round(area_m2, 2)}
+                "properties": {
+                    "area": round(poly.area, 2)
+                }
             })
 
     return {
         "type": "FeatureCollection",
         "features": features
     }
+
 
 @app.route("/")
 def index():
