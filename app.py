@@ -1,55 +1,52 @@
 from flask import Flask, request, jsonify
-from shapely.geometry import Polygon, LineString, mapping, GeometryCollection
+from shapely.geometry import Polygon, LineString, mapping
 from shapely.ops import split
+from shapely import geometry
+from pyproj import Geod
 
 app = Flask(__name__)
+geod = Geod(ellps="WGS84")  # for accurate area in m²
+
+def calculate_area_m2(polygon: Polygon) -> float:
+    lon, lat = polygon.exterior.coords.xy
+    return abs(geod.geometry_area_perimeter(geometry.Polygon(zip(lon, lat)))[0])
 
 def subdivide_polygon_auto(coords, n_parts):
     polygon = Polygon(coords)
-    bounds = polygon.bounds
-    minx, miny, maxx, maxy = bounds
-    width = maxx - minx
-    height = maxy - miny
-
     if polygon.is_empty or not polygon.is_valid:
         raise ValueError("Invalid polygon")
 
-    split_lines = []
-    if width > height:
-        step = width / n_parts
-        for i in range(1, n_parts):
-            x = minx + i * step
-            split_line = LineString([(x, miny - 1), (x, maxy + 1)])
-            split_lines.append(split_line)
-    else:
-        step = height / n_parts
-        for i in range(1, n_parts):
-            y = miny + i * step
-            split_line = LineString([(minx - 1, y), (maxx + 1, y)])
-            split_lines.append(split_line)
+    minx, miny, maxx, maxy = polygon.bounds
+    width, height = maxx - minx, maxy - miny
 
-    # Perform splitting
-    for line in split_lines:
+    # Auto choose direction
+    step = (width if width > height else height) / n_parts
+    lines = []
+    for i in range(1, n_parts):
+        if width > height:
+            x = minx + i * step
+            lines.append(LineString([(x, miny - 1), (x, maxy + 1)]))
+        else:
+            y = miny + i * step
+            lines.append(LineString([(minx - 1, y), (maxx + 1, y)]))
+
+    result = polygon
+    for line in lines:
         try:
-            polygon = split(polygon, line)
+            result = split(result, line)
         except Exception:
             continue
 
-    # Normalize result
-    if isinstance(polygon, GeometryCollection):
-        polygons = [geom for geom in polygon.geoms if isinstance(geom, Polygon)]
-    elif isinstance(polygon, Polygon):
-        polygons = [polygon]
-    else:
-        polygons = list(polygon)
+    polygons = list(result) if not isinstance(result, Polygon) else [result]
 
     features = []
     for poly in polygons:
         if poly.area > 0:
+            area_m2 = calculate_area_m2(poly)
             features.append({
                 "type": "Feature",
                 "geometry": mapping(poly),
-                "properties": {"area": poly.area}
+                "properties": {"area_m2": round(area_m2, 2)}
             })
 
     return {
@@ -59,7 +56,7 @@ def subdivide_polygon_auto(coords, n_parts):
 
 @app.route("/")
 def index():
-    return "Plot Subdivision API (Auto Equal Area) is running"
+    return "Plot Subdivision API (Auto Equal Area + Area Calculation) is running"
 
 @app.route("/subdivide", methods=["POST"])
 def subdivide():
