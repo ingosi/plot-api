@@ -1,78 +1,75 @@
 
 from flask import Flask, request, jsonify
-import geopandas as gpd
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, LineString, mapping
 from shapely.ops import split
-from shapely import affinity
-import json
 
 app = Flask(__name__)
 
-def create_polygon(coords):
-    return Polygon(coords)
+def subdivide_polygon_auto(coords, n_parts):
+    polygon = Polygon(coords)
+    bounds = polygon.bounds
+    minx, miny, maxx, maxy = bounds
+    width = maxx - minx
+    height = maxy - miny
 
-def subdivide_polygon_equal_area(polygon, count, direction):
-    total_area = polygon.area
-    target_area = total_area / count
+    if polygon.is_empty or not polygon.is_valid:
+        raise ValueError("Invalid polygon")
 
-    minx, miny, maxx, maxy = polygon.bounds
-    slices = []
+    split_lines = []
+    if width > height:
+        step = width / n_parts
+        for i in range(1, n_parts):
+            x = minx + i * step
+            split_line = LineString([(x, miny - 1), (x, maxy + 1)])
+            split_lines.append(split_line)
+    else:
+        step = height / n_parts
+        for i in range(1, n_parts):
+            y = miny + i * step
+            split_line = LineString([(minx - 1, y), (maxx + 1, y)])
+            split_lines.append(split_line)
 
-    if direction == 'vertical':
-        width = maxx - minx
-        x_start = minx
-        step = width / count
-        for i in range(count):
-            x0 = x_start + i * step
-            x1 = x0 + step
-            slice_poly = Polygon([
-                (x0, miny), (x1, miny), (x1, maxy), (x0, maxy), (x0, miny)
-            ])
-            intersected = polygon.intersection(slice_poly)
-            slices.append(intersected)
+    for line in split_lines:
+        try:
+            polygon = split(polygon, line)
+        except Exception:
+            continue
 
-    elif direction == 'horizontal':
-        height = maxy - miny
-        y_start = miny
-        step = height / count
-        for i in range(count):
-            y0 = y_start + i * step
-            y1 = y0 + step
-            slice_poly = Polygon([
-                (minx, y0), (maxx, y0), (maxx, y1), (minx, y1), (minx, y0)
-            ])
-            intersected = polygon.intersection(slice_poly)
-            slices.append(intersected)
-
-    return slices
-
-@app.route('/subdivide', methods=['POST'])
-def subdivide():
-    data = request.get_json()
-    count = int(data['count'])
-    direction = data['direction']
-    coords = data['coordinates']
-
-    polygon = create_polygon(coords)
-    subplots = subdivide_polygon_equal_area(polygon, count, direction)
+    if isinstance(polygon, Polygon):
+        polygons = [polygon]
+    else:
+        polygons = list(polygon)
 
     features = []
-    for poly in subplots:
-        if not poly.is_empty:
-            coords = list(poly.exterior.coords)
+    for poly in polygons:
+        if poly.area > 0:
             features.append({
                 "type": "Feature",
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [coords]
-                },
-                "properties": {}
+                "geometry": mapping(poly),
+                "properties": {"area": poly.area}
             })
 
-    return jsonify({
+    return {
         "type": "FeatureCollection",
         "features": features
-    })
+    }
 
-if __name__ == '__main__':
+@app.route("/")
+def index():
+    return "Plot Subdivision API (Auto Equal Area) is running"
+
+@app.route("/subdivide", methods=["POST"])
+def subdivide():
+    data = request.get_json()
+    coords = data.get("coordinates")
+    count = data.get("count")
+    if not coords or not count:
+        return jsonify({"error": "Missing 'coordinates' or 'count'"}), 400
+    try:
+        geojson = subdivide_polygon_auto(coords, int(count))
+        return jsonify(geojson)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
     app.run(debug=True)
