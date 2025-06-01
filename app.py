@@ -1,6 +1,5 @@
-
 from flask import Flask, request, jsonify
-from shapely.geometry import Polygon, LineString, mapping
+from shapely.geometry import Polygon, LineString, mapping, GeometryCollection
 from shapely.ops import split
 
 app = Flask(__name__)
@@ -29,13 +28,17 @@ def subdivide_polygon_auto(coords, n_parts):
             split_line = LineString([(minx - 1, y), (maxx + 1, y)])
             split_lines.append(split_line)
 
+    # Perform splitting
     for line in split_lines:
         try:
             polygon = split(polygon, line)
         except Exception:
             continue
 
-    if isinstance(polygon, Polygon):
+    # Normalize result
+    if isinstance(polygon, GeometryCollection):
+        polygons = [geom for geom in polygon.geoms if isinstance(geom, Polygon)]
+    elif isinstance(polygon, Polygon):
         polygons = [polygon]
     else:
         polygons = list(polygon)
